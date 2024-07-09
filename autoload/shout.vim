@@ -91,10 +91,11 @@ export def CaptureOutput(command: string, follow: bool = false)
 
     shout_job = job_start(job_command, {
         cwd: cwd,
+        pty: 1,
         out_io: 'buffer',
         out_buf: bufnr,
         out_msg: 0,
-        err_io: 'out',
+        err_io: 'buffer',
         err_buf: bufnr,
         err_msg: 0,
         close_cb: (channel) => {
@@ -116,11 +117,13 @@ export def CaptureOutput(command: string, follow: bool = false)
         }
     })
 
-    b:shout_cmd = command
+    t:shout_cmd = command
 
     if follow
         normal! G
     endif
+
+    wincmd p
 enddef
 
 export def OpenFile()

@@ -35,6 +35,16 @@ syn match shoutTexError '^\s*==> .* <==$'
 
 syn match shoutTodo "\<\(TODO\|FIXME\|XXX\):"
 
+syn match shoutLogDebug "\<\(TRACE\|trace\|DEBUG\|debug\|note\)\>"
+syn match shoutLogInfo  "\<\(INFO\|info\)\>"
+syn match shoutLogWarn  "\<\(WARN\|warn\|warning\)\>"
+syn match shoutLogError "\<\(ERROR\|error\)\>"
+
+hi def link shoutLogInfo String
+hi def link shoutLogWarn Constant
+hi def link shoutLogError Statement
+hi def link ShoutLogDebug Comment
+
 hi def link shoutCmdPrompt Statement
 hi def link shoutPath String
 hi def link shoutNr Constant

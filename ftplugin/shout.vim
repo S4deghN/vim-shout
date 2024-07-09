@@ -6,7 +6,7 @@ endif
 
 b:did_ftplugin = 1
 
-setl cursorline
+# setl cursorline
 setl cursorlineopt=both
 setl bufhidden=hide
 setl buftype=nofile
