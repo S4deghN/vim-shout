@@ -69,7 +69,8 @@ def PrepareBuffer(shell_cwd: string): number
     return bufnr
 enddef
 
-export def CaptureOutput(command: string, follow: bool = false)
+export def CaptureOutput(command: string, not_follow: bool = false)
+    var follow = false
     var cwd = getcwd()
     var bufnr = PrepareBuffer(cwd->substitute('#', '\\&', 'g'))
 
