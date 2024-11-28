@@ -1,8 +1,18 @@
 vim9script
 
 const W_THRESHOLD = 160
+var bufname = '[shout]'
+var alt_filetype = ''
 
+# Define global variables
 var shout_job: job
+var initial_winid = 0
+
+var bufnr = -1
+var follow = 1
+
+var shout_count = 0
+
 
 def Vertical(): string
     var result = ""
@@ -36,63 +46,98 @@ def ShoutWinId(): number
     return -1
 enddef
 
-def PrepareBuffer(shell_cwd: string): number
-    var bufname = '[shout]'
+export def GetShoutBufnr(): number
     var buffers = getbufinfo()->filter((_, v) => fnamemodify(v.name, ":t") == bufname)
-
-    var bufnr = -1
-
     if len(buffers) > 0
-        bufnr = buffers[0].bufnr
+        return buffers[0].bufnr
     else
-        bufnr = bufadd(bufname)
+        return -1
     endif
+enddef
 
-    var windows = win_findbuf(bufnr)
-    var initial_winid = win_getid()
+def UseSplitOrCreate(): number
+    var current_win_pos = win_screenpos(0)
+    var winnr = winnr()
 
-    if windows->len() == 0
-        exe "botright" Vertical() "sbuffer" bufnr
-        b:shout_initial_winid = initial_winid
-        setl filetype=shout
+    if &columns > 160
+        if winnr != winnr('1l')
+            return win_getid(winnr('1l'))
+        elseif winnr != winnr('1h')
+            return win_getid(winnr('1h'))
+        else
+            :botright vsplit
+            :wincmd p
+            return win_getid(winnr('#'))
+        endif
     else
+        if winnr != winnr('1j')
+            return win_getid(winnr('1j'))
+        elseif winnr != winnr('1k')
+            return win_getid(winnr('1k'))
+        else
+            :botright split
+            :wincmd p
+            return win_getid(winnr('#'))
+        endif
+    endif
+enddef
+
+def PrepareBuffer(shell_cwd: string): number
+    initial_winid = win_getid()
+
+    bufnr = GetShoutBufnr()
+    var windows = win_findbuf(bufnr)
+
+    var shout_window_exist = len(windows)
+    if shout_window_exist
         win_gotoid(windows[0])
+    else
+        var winid = UseSplitOrCreate()
+        win_gotoid(winid)
+        if bufnr < 0
+            bufnr = bufadd(bufname)
+        endif
+        exec "buffer " .. bufnr
+        setl filetype=shout
     endif
 
     silent :%d _
+    # or. because a buftype=nofile is emptied with this command
+    # but it causes weird syntax highlihgt bug!
+    #:e
 
     b:shout_cwd = shell_cwd
-    exe "silent lcd" shell_cwd
+    exe 'silent lcd' shell_cwd
 
     setl undolevels=-1
 
     return bufnr
 enddef
 
-export def CaptureOutput(command: string, not_follow: bool = false)
-    var follow = false
+export def CaptureOutput(command: string, ...args: list<string>)
+    # Optionaly set file name and filetype
+    bufname = get(args, 0, '[shout]')
+    alt_filetype = get(args, 1, '')
+
     var cwd = getcwd()
-    var bufnr = PrepareBuffer(cwd->substitute('#', '\\&', 'g'))
+    bufnr = PrepareBuffer(cwd->substitute('#', '\\&', 'g'))
 
     setbufvar(bufnr, "shout_exit_code", "")
 
-    setbufline(bufnr, 1, $"$ {command}")
-    setbufline(bufnr, 2, "")
+    setbufline(bufnr, 1, "$ " .. command)
+    appendbufline(bufnr, "$", "")
 
-    if shout_job->job_status() == "run"
-        shout_job->job_stop()
+    if job_status(shout_job) == "run"
+        job_stop(shout_job)
     endif
 
-    var job_command: any
-    if has("win32")
-        job_command = command
-    else
-        job_command = [&shell, &shellcmdflag, escape(command, '\')]
-    endif
+    var job_command = has('win32') ? command : [&shell, &shellcmdflag, escape(command, '\')]
 
     shout_job = job_start(job_command, {
         cwd: cwd,
         pty: 1,
+        # in_io: 'buffer',
+        # in_buf: bufnr,
         out_io: 'buffer',
         out_buf: bufnr,
         out_msg: 0,
@@ -100,20 +145,30 @@ export def CaptureOutput(command: string, not_follow: bool = false)
         err_buf: bufnr,
         err_msg: 0,
         close_cb: (channel) => {
-            if !bufexists(bufnr)
-                return
-            endif
+            if !bufexists(bufnr) | return | endif
+
             var winid = bufwinid(bufnr)
             var exit_code = job_info(shout_job).exitval
-            if get(g:, "shout_print_exit_code", true)
-                var msg = [""]
-                msg += ["Exit code: " .. exit_code]
-                appendbufline(bufnr, line('$', winid), msg)
+
+            if exit_code == 0 && len(alt_filetype) > 0
+                win_execute(winid, "setl filetype=" .. alt_filetype .. " buftype=nofile buflisted")
+                win_execute(winid, "nnoremap <buffer> <CR> :OpenFile<CR>")
+            else
+                if &filetype != 'shout'
+                    win_execute(winid, "setl filetype=shout")
+                endif
+
+                if get(g:, "shout_print_exit_code", 1)
+                    appendbufline(bufnr, line('$', winid), "")
+                    appendbufline(bufnr, line('$', winid), "Exit code: " .. exit_code)
+                endif
+                setbufvar(bufnr, "shout_exit_code", string(exit_code))
             endif
-            if follow
-                win_execute(winid, "normal! G")
-            endif
-            setbufvar(bufnr, "shout_exit_code", $"{exit_code}")
+
+            # if follow
+            #     win_execute(winid, "normal! G")
+            # endif
+
             win_execute(winid, "setl undolevels&")
         }
     })
@@ -124,7 +179,15 @@ export def CaptureOutput(command: string, not_follow: bool = false)
         normal! G
     endif
 
-    wincmd p
+    win_gotoid(initial_winid)
+enddef
+
+sign define ShoutArrow text==> texthl=Normal
+def SignJumpLine()
+    sign_unplace('Shout', {'id': 1, 'buffer': bufnr()})
+    sign_place(1, 'Shout', 'ShoutArrow', bufnr(), {'lnum': line('.')})
+    # if !!get(w:, 'match') | matchdelete(w:match) | endif
+    # w:match = matchaddpos('Visual', [line('.')])
 enddef
 
 export def OpenFile()
@@ -138,7 +201,7 @@ export def OpenFile()
         var cmd = getline(".")->matchstr('^\$ \zs.*$')
         if cmd !~ '^\s*$'
             var pos = getcurpos()
-            CaptureOutput(cmd, false)
+            CaptureOutput(cmd, bufname, alt_filetype)
             setpos('.', pos)
         endif
         return
@@ -180,37 +243,32 @@ export def OpenFile()
     endif
 
     if fname->len() > 0 && filereadable(fname[1])
+        SignJumpLine()
         try
-            var should_split = false
-            var buffers = getbufinfo()->filter((_, v) => v.name == fnamemodify(fname[1], ":p"))
-            fname[1] = fname[1]->substitute('#', '\\&', 'g')
+            var should_split = 0
+            var buffers = filter(getbufinfo(), (idx, v) => fnamemodify(fname[1], ":p") == v.name)
+            fname[1] = substitute(fname[1], '#', '\&', 'g')
+
             # goto opened file if it is visible
-            if len(buffers) > 0 && len(buffers[0].windows) > 0
-                win_gotoid(buffers[0].windows[0])
-            # goto first non shout window otherwise
-            elseif win_gotoid(FindOtherWin())
-                if !&hidden && &modified
-                    should_split = true
+            if len(buffers) > 0
+                if len(buffers[0].windows) > 0
+                    win_gotoid(buffers[0].windows[0])
+                else
+                    win_gotoid(UseSplitOrCreate())
+                    execute "buffer" fname[1]
                 endif
             else
-                should_split = true
-            endif
-
-            exe $"lcd {shout_cwd}"
-
-            if should_split
-                exe Vertical() "split" fname[1]
-            else
-                exe "edit" fname[1]
+                win_gotoid(UseSplitOrCreate())
+                execute "edit" fname[1]
             endif
 
             if !empty(fname[2])
-                exe $":{fname[2]}"
-                exe "normal! 0"
+                execute ":" .. fname[2]
+                execute "normal! 0"
             endif
 
-            if !empty(fname[3]) && fname[3]->str2nr() > 1
-                exe $"normal! {fname[3]->str2nr() - 1}l"
+            if !empty(fname[3]) && str2nr(fname[3]) > 1
+                execute "normal! " .. (str2nr(fname[3])) .. "|"
             endif
             normal! zz
         catch
@@ -224,13 +282,42 @@ export def Kill()
     endif
 enddef
 
-export def CloseWindow()
+export def OpenWindow(): number
+    bufnr = GetShoutBufnr()
+    if bufnr < 0
+        bufnr = bufadd(bufname)
+    endif
+
+    var windows = win_findbuf(bufnr)
+    initial_winid = win_getid()
+
+    # TODO: instead of this hack of jumping back find a ways to open the window without jumping to it.
+    if len(windows) == 0
+        exe 'botright ' .. Vertical() .. ' sbuffer' bufnr
+        setl filetype=shout
+        var ret = win_getid()
+        win_gotoid(initial_winid)
+        return ret
+    else
+        return windows[0]
+    endif
+enddef
+
+export def ToggleWindow()
     var winid = ShoutWinId()
     if winid == -1
-        return
+        OpenWindow()
+    else
+        var winnr = getwininfo(winid)[0].winnr
+        exe $":{winnr}close"
     endif
-    var winnr = getwininfo(winid)[0].winnr
-    exe $":{winnr}close"
+enddef
+
+export def ShoutToQf()
+    bufnr = GetShoutBufnr()
+    if bufnr > 0
+        cgetexpr getbufline(bufnr, 1, "$")
+    endif
 enddef
 
 export def NextError()
@@ -285,3 +372,11 @@ export def LastErrorJump()
        :exe "normal ]}\<CR>"
     endif
 enddef
+
+export def ThisErrorJump()
+    if win_gotoid(ShoutWinId())
+        :exe "normal \<CR>"
+    endif
+enddef
+
+defc
