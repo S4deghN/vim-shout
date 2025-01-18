@@ -7,7 +7,7 @@ g:loaded_shout = 1
 
 import autoload 'shout.vim'
 
-command! -nargs=1 -bang -complete=file Sh shout.CaptureOutput(<f-args>)
+command! -nargs=1 -complete=shellcmdline Sh shout.CaptureOutput(<f-args>)
 command! -nargs=0 -bar ShoutToggle    shout.ToggleWindow()
 command! -nargs=0 -bar ShoutToQf      shout.ShoutToQf()
 command! -nargs=0 -bar OpenFile       shout.OpenFile()

@@ -183,11 +183,21 @@ export def CaptureOutput(command: string, ...args: list<string>)
 enddef
 
 sign define ShoutArrow text==> texthl=Normal
+
+if !prop_type_get('arrow')
+    prop_type_add('arrow', {highlight: 'Comment'})
+endif
+
+var pr = 0
 def SignJumpLine()
     sign_unplace('Shout', {'id': 1, 'buffer': bufnr()})
     sign_place(1, 'Shout', 'ShoutArrow', bufnr(), {'lnum': line('.')})
-    # if !!get(w:, 'match') | matchdelete(w:match) | endif
-    # w:match = matchaddpos('Visual', [line('.')])
+    # if !!get(b:, 'match') | silent! matchdelete(b:match) | endif
+    # b:match = matchaddpos('Visual', [[line('.'), 1, 3]])
+    # if !!pr
+    #     prop_remove({id: pr})
+    # endif
+    # pr = prop_add(line('.'), 1, {type: 'arrow', text: '=>'})
 enddef
 
 export def OpenFile()
